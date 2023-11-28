@@ -2,33 +2,68 @@ import java.util.Comparator;
 
 import components.map.Map;
 import components.map.Map1L;
-import components.queue.Queue;
-import components.queue.Queue1L;
 import components.set.Set;
 import components.set.Set1L;
 import components.simplereader.SimpleReader;
 import components.simplereader.SimpleReader1L;
 import components.simplewriter.SimpleWriter;
 import components.simplewriter.SimpleWriter1L;
+import components.sortingmachine.SortingMachine;
+import components.sortingmachine.SortingMachine1L;
 
 /**
  * Counts the word occurrences in a given input file and outputs an HTML
- * document with a table of the words and their respective counts in
- * alphabetical order. Project built from a direct copy of the SW1 Glossary
- * Project.
+ * document of a alphabetized tag cloud using a user-input quantity of the most
+ * commonly occuring words. Project built from a direct copy of the SW2
+ * WordCounter Project.
  *
- * @author Nicholas McCracken
+ * @author Nicholas McCracken and Jack Mikesell
  *
  */
 public final class TagCloudGen {
 
     /**
-     * Compare {@code String}s in lexicographic order. Reused from SW1 Glossary.
+     * Compare keys of {@code Map.Pair<String, Integer>}s in lexicographic order
+     * while ignoring case.
      */
-    private static class StringLT implements Comparator<String> {
+    private static class KeyLT
+            implements Comparator<Map.Pair<String, Integer>> {
         @Override
-        public int compare(String o1, String o2) {
-            return o1.compareToIgnoreCase(o2);
+        public int compare(Map.Pair<String, Integer> o1,
+                Map.Pair<String, Integer> o2) {
+
+            /*
+             * Ensure a zero is only returned when both pairs, which includes
+             * their key and value, are equal to one another to be consistent
+             * with equals.
+             */
+            int compare = o1.key().compareToIgnoreCase(o2.key());
+            if (compare == 0) {
+                compare = o2.value().compareTo(o1.value());
+            }
+            return compare;
+        }
+    }
+
+    /**
+     * Compare values of {@code Map.Pair<String, Integer>}s in descending order.
+     */
+    private static class ValueLT
+            implements Comparator<Map.Pair<String, Integer>> {
+        @Override
+        public int compare(Map.Pair<String, Integer> o1,
+                Map.Pair<String, Integer> o2) {
+
+            /*
+             * Ensure a zero is only returned when both pairs, which includes
+             * their key and value, are equal to one another to be consistent
+             * with equals.
+             */
+            int compare = o2.value().compareTo(o1.value());
+            if (compare == 0) {
+                compare = o1.key().compareToIgnoreCase(o2.key());
+            }
+            return compare;
         }
     }
 
@@ -60,7 +95,12 @@ public final class TagCloudGen {
          */
         Set<Character> strEntries = charSet.newInstance();
         for (int i = 0; i < str.length(); i++) {
-            strEntries.add(str.charAt(i));
+            char c = str.charAt(i);
+
+            // Ensure duplicate characters are not accidentally added.
+            if (!strEntries.contains(c)) {
+                strEntries.add(c);
+            }
         }
         charSet.transferFrom(strEntries);
     }
@@ -123,7 +163,12 @@ public final class TagCloudGen {
             wordOrSeparator += text.charAt(i);
             i++;
         }
-        return wordOrSeparator;
+
+        /*
+         * Convert word to lowercase so the same word with different
+         * capitalization does not occur multiple times in the tag cloud.
+         */
+        return wordOrSeparator.toLowerCase();
     }
 
     /**
@@ -155,7 +200,7 @@ public final class TagCloudGen {
          */
         SimpleReader inFile = new SimpleReader1L(inputFile);
         Set<Character> separators = new Set1L<Character>();
-        generateElements(" `~!@#$%^&*()_-+={[]}|\\;:\",./?<>", separators);
+        generateElements(" \"\t\n\r,-.!?[]'`~@#$%^&*-=+{}|<>;:/()", separators);
 
         /*
          * Store each word and it's number of occurrences in the map until the
@@ -194,106 +239,165 @@ public final class TagCloudGen {
     }
 
     /**
-     * Inputs a list of terms and their definitions from the given file and
-     * stores them alphabetically in the given {@code Queue}. Redesigned from
-     * SW1 Glossary.
+     * Stores a list of unique words of up to wordQuantity and their number of
+     * occurrences from the {@code Map} alphabetically in the given
+     * {@code SortingMachine}.
      *
+     * @param wordQuantity
+     *            the maximum number of unique words to store in topNWords
+     * @param topNWords
+     *            the {@code SortingMachine} of words in descending order based
+     *            on their number of occurrences
+     * @param alphabetized
+     *            the {@code SortingMachine} of up to wordQuantity unique words
+     *            in alphabetical order
      * @param wordCountMap
      *            the {@code Map} of unique words and their number of
      *            occurrences
-     * @param wordQueue
-     *            the {@code Queue} of unique words in alphabetical order
-     * @replaces termQueue
+     *
+     * @replaces alphabetized
      * @requires <pre>
-     * [file named fileName exists but is not open, and has the
-     *  format of one term (unique in the file) on a line followed by it's
-     *  definition on the next line and empty lines separating each term
-     *  definition pair]
+     * [file named fileName exists but is not open] and 0 <= wordQuantity
      * </pre>
-     * @ensures [Queue contains terms ordered alphabetically -> term queueing
-     *          from Map]
+     * @ensures [SortingMachine contains up to wordQuantity terms ordered
+     *          alphabetically -> term queueing from Map]
      */
-    private static void alphabetizeWords(Map<String, Integer> wordCountMap,
-            Queue<String> wordQueue) {
+    private static void alphabetizeTopNWords(int wordQuantity,
+            SortingMachine<Map.Pair<String, Integer>> topNWords,
+            SortingMachine<Map.Pair<String, Integer>> alphabetized,
+            Map<String, Integer> wordCountMap) {
+        assert 0 <= wordQuantity : "Violation of: 0 <= wordQuantity";
+        assert topNWords != null : "Violation of: topNWords is not null";
+        assert alphabetized != null : "Violation of: alphabetized is not null";
         assert wordCountMap != null : "Violation of: wordCountMap is not null";
-        assert wordQueue != null : "Violation of: wordQueue is not null";
 
-        /*
-         * Store each unique word from the map in the queue until the end of the
-         * file is reached, then close the input stream.
-         */
+        //Store each word count pair from the map in the sorting machine.
         for (Map.Pair<String, Integer> pair : wordCountMap) {
-            wordQueue.enqueue(pair.key());
+            topNWords.add(pair);
         }
 
-        // Use comparator to sort the words in alphabetical order.
-        Comparator<String> alphabetize = new StringLT();
-        wordQueue.sort(alphabetize);
+        // Store pairs up to wordQuantity and sort them alphabetically.
+        topNWords.changeToExtractionMode();
+        int counter = 0;
+        while (topNWords.size() > 0 && counter < wordQuantity) {
+            alphabetized.add(topNWords.removeFirst());
+            counter++;
+        }
+    }
+
+    /**
+     * Returns the minimum and maximum number of occurences in the given
+     * {@code wordCounts}.
+     *
+     * @param wordCounts
+     *            the {@code SortingMachine} to be searched through containing
+     *            pairs of their unique words and their number of occurrences
+     * @return minimum and maximum number of occurences in {@code wordCounts}
+     * @ensures findMinMaxCounts = [min(values in {@code wordCounts}),
+     *          max(values in {@code wordCounts})]
+     */
+    private static int[] findMinMaxCounts(
+            SortingMachine<Map.Pair<String, Integer>> wordCounts) {
+        assert wordCounts != null : "Violation of: wordCountMap is not null";
+
+        // Initialize array with seed values to ensure correct comparsion.
+        int[] minMax = new int[2];
+        minMax[0] = Integer.MAX_VALUE;
+        minMax[1] = -1;
+
+        // Iterate through the sorting machine to find the min and max.
+        for (Map.Pair<String, Integer> wordCount : wordCounts) {
+            int count = wordCount.value();
+            minMax[0] = Math.min(minMax[0], count);
+            minMax[1] = Math.max(minMax[1], count);
+        }
+
+        /*
+         * Explicitly guard against one word edge case to ensure formula for
+         * calculating font size does not divide by zero.
+         */
+        if (minMax[0] == minMax[1]) {
+            minMax[0] = 0;
+        }
+
+        return minMax;
     }
 
     /**
      * Generates an HTML file which lists each word from an input file in an
      * alphabetized table, along with it's number of occurrences in said file.
-     * Redesigned from SW1 Glossary.
      *
+     * @param heading
+     *            the {@code String} heading for the html file
      * @param outputFile
      *            the name of the output file
-     * @param wordCountMap
-     *            the {@code Map} of unique words and their number of
-     *            occurrences
-     * @param wordQueue
-     *            the {@code Queue} of unique words in alphabetical order
-     * @clears wordQueue
+     * @param alphabetized
+     *            the {@code SortingMachine} of top N occuring words in
+     *            alphabetical order
+     * @clears alphabetized
      * @ensures <pre>
      * [generates HTML file with each unique word from the input file in an
-     * alphabetized table along with it's number of occurrences in said file]
+     * alphabetized tag cloud with it's font size corresponding to it's number
+     * of occurrences in the file relative to other words]
      * </pre>
      */
-    private static void generateWordCountTable(String outputFile,
-            Map<String, Integer> wordCountMap, Queue<String> wordQueue) {
+    private static void generateWordCountTable(String heading,
+            String outputFile,
+            SortingMachine<Map.Pair<String, Integer>> alphabetized) {
+        assert heading != null : "Violation of: heading is not null";
         assert outputFile != null : "Violation of: outputFile is not null";
-        assert wordCountMap != null : "Violation of: wordCountMap is not null";
-        assert wordQueue != null : "Violation of: wordQueue is not null";
+        assert alphabetized != null : "Violation of: alphabetized is not null";
 
         // Open an output stream to write to a file stored in folder.
         SimpleWriter fileOut = new SimpleWriter1L(outputFile);
 
-        // Create opening tags including a title, heading, and table heading.
+        /*
+         * Create opening tags including a title, linked css stylesheet, head,
+         * and div to store the tag cloud.
+         */
         fileOut.println("<html>");
         fileOut.println("<head>");
-        fileOut.println("<title>Word Counter</title>");
-        fileOut.println("<style>");
-        fileOut.println("table, th, td {border: 1px solid black;}");
-        fileOut.println("</style>");
+        fileOut.println(
+                "<link rel=\"stylesheet\" href=\"http://web.cse.ohio-state.edu"
+                        + "/software/2231/web-sw2/assignments/projects"
+                        + "/tag-cloud-generator/data/tagcloud.css\" type=\"text/css\">");
+        fileOut.println(
+                "<link href=\"data/tagcloud.css\" rel=\"stylesheet\" type=\"text/css\">");
+        fileOut.println("<title>" + heading + "</title>");
         fileOut.println("</head>");
         fileOut.println("<body>");
-        fileOut.println("<h1>Words Counted in " + outputFile + "</h1>");
+        fileOut.println("<h2>" + heading + "</h2>");
         fileOut.println("<hr>");
-        fileOut.println("<table>");
-        fileOut.println("<tr>");
-        fileOut.println("<th>Words</th>");
-        fileOut.println("<th>Counts</th>");
-        fileOut.println("</tr>");
+        fileOut.println("<div class=\"cdiv\">");
+        fileOut.println("<p class=\"cbox\">");
 
         /*
-         * For each word stored in alphabetizedWords, add a row to the table
-         * including the word itself and it's number of occurrences in the file.
+         * For each word stored in alphabetized, calculate it's font size
+         * corresponding to it's number of occurrences in the file and place it
+         * within the tag cloud div.
          */
-        while (wordQueue.length() > 0) {
-            String word = wordQueue.dequeue();
+        final int maxFont = 37, minFont = 11;
+        final int[] minMax = findMinMaxCounts(alphabetized);
+        alphabetized.changeToExtractionMode();
 
-            fileOut.println("<tr>");
-            fileOut.print("<td>");
-            fileOut.print(word);
-            fileOut.println("</td>");
-            fileOut.print("<td>");
-            fileOut.print(wordCountMap.value(word));
-            fileOut.println("</td>");
-            fileOut.println("</tr>");
+        while (alphabetized.size() > 0) {
+            Map.Pair<String, Integer> wordCount = alphabetized.removeFirst();
+
+            int count = wordCount.value();
+            // Determine class corresponding to font size with given formula
+            int fontSize = minFont
+                    + (maxFont * (count - minMax[0])) / (minMax[1] - minMax[0]);
+
+            fileOut.print("<span style=\"cursor:default\" ");
+            fileOut.print("class=\"" + "f" + fontSize + "\" ");
+            fileOut.print("title=\"count: " + count + "\">");
+            fileOut.print(wordCount.key());
+            fileOut.println("</span>");
         }
 
         // Close all opened tags and output stream.
-        fileOut.println("</table>");
+        fileOut.println("</p>");
+        fileOut.println("</div>");
         fileOut.println("</body>");
         fileOut.println("</html>");
         fileOut.close();
@@ -312,8 +416,8 @@ public final class TagCloudGen {
 
         /*
          * Prompt user for the name of an input file to read words from and an
-         * output folder to create a table of all the word's and their
-         * respective number of occurrences in.
+         * output file to generate a tag cloud in, as well as the number of
+         * words to be included in the tag cloud.
          */
         out.print("Enter the name "
                 + "of an input file and it's path with a .txt extension: ");
@@ -321,21 +425,33 @@ public final class TagCloudGen {
         out.print("Enter the name "
                 + "of an output file and it's path with a .html extension: ");
         String outputFile = in.nextLine();
+        out.print("Enter the quantity of words for the tag cloud: ");
+        int wordQuantity = Integer.parseInt(in.nextLine());
 
         // Store all words and their respective counts from input file in a map.
         Map<String, Integer> wordCountMap = new Map1L<String, Integer>();
         countWords(inputFile, wordCountMap);
 
-        // Store all words from map in an alphabetized queue.
-        Queue<String> wordQueue = new Queue1L<String>();
-        alphabetizeWords(wordCountMap, wordQueue);
+        /*
+         * Store all words from map in an alphabetized sorting machine. Note:
+         * Line length cannot be fixed as the line is saved like this by
+         * checkstyle.
+         */
+        SortingMachine<Map.Pair<String, Integer>> topNWords = new SortingMachine1L<Map.Pair<String, Integer>>(
+                new ValueLT()),
+                alphabetized = new SortingMachine1L<Map.Pair<String, Integer>>(
+                        new KeyLT());
+        alphabetizeTopNWords(wordQuantity, topNWords, alphabetized,
+                wordCountMap);
 
         /*
-         * Generates an HTML file which lists each word from an input file in an
-         * alphabetized table, along with it's number of occurrences in said
-         * file.
+         * Generates an HTML file with a heading stating the file name and
+         * number of words included along with a tag cloud of up to the most
+         * commonly occuring words.
          */
-        generateWordCountTable(outputFile, wordCountMap, wordQueue);
+        String heading = "Top " + alphabetized.size() + " words in "
+                + inputFile;
+        generateWordCountTable(heading, outputFile, alphabetized);
 
         // Close input and output streams.
         in.close();
